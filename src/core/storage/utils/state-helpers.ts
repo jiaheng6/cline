@@ -322,6 +322,9 @@ export async function readGlobalStateFromDisk(context: ExtensionContext): Promis
 		const openTelemetryLogMaxQueueSize =
 			context.globalState.get<GlobalStateAndSettings["openTelemetryLogMaxQueueSize"]>("openTelemetryLogMaxQueueSize")
 		const subagentsEnabled = context.globalState.get<GlobalStateAndSettings["subagentsEnabled"]>("subagentsEnabled")
+		const enhancedNotebookInteractionEnabled = context.globalState.get<
+			GlobalStateAndSettings["enhancedNotebookInteractionEnabled"]
+		>("enhancedNotebookInteractionEnabled")
 
 		// Get mode-related configurations
 		const mode = context.globalState.get<GlobalStateAndSettings["mode"]>("mode")
@@ -686,6 +689,7 @@ export async function readGlobalStateFromDisk(context: ExtensionContext): Promis
 			hooksEnabled: getHooksEnabledSafe(hooksEnabled),
 			subagentsEnabled: subagentsEnabled ?? false,
 			enableParallelToolCalling: enableParallelToolCalling ?? false,
+			enhancedNotebookInteractionEnabled: enhancedNotebookInteractionEnabled ?? false,
 			lastDismissedInfoBannerVersion: lastDismissedInfoBannerVersion ?? 0,
 			lastDismissedModelBannerVersion: lastDismissedModelBannerVersion ?? 0,
 			lastDismissedCliBannerVersion: lastDismissedCliBannerVersion ?? 0,
