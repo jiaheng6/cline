@@ -69,12 +69,16 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 	let hookMessageTs: number | undefined
 	const abortController = new AbortController()
 
+	// Get hook info including script paths (declare outside try block for error handling)
+	const hookInfo = await hookFactory.getHookInfo(hookName)
+
 	try {
 		// Show hook execution indicator and capture timestamp
 		const hookMetadata = {
 			hookName,
 			...(options.toolName && { toolName: options.toolName }),
 			status: "running",
+			scriptPaths: hookInfo.scriptPaths,
 			...(options.pendingToolInfo && { pendingToolInfo: options.pendingToolInfo }),
 		}
 		hookMessageTs = await say("hook", JSON.stringify(hookMetadata))
@@ -124,6 +128,7 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 					status: "cancelled",
 					exitCode: 130,
 					hasJsonResponse: true,
+					scriptPaths: hookInfo.scriptPaths,
 				})
 			}
 
@@ -148,6 +153,7 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 				status: "completed",
 				exitCode: 0,
 				hasJsonResponse: true,
+				scriptPaths: hookInfo.scriptPaths,
 			})
 		}
 
@@ -171,6 +177,7 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 					hookName,
 					status: "cancelled",
 					exitCode: 130,
+					scriptPaths: hookInfo.scriptPaths,
 				})
 			}
 
@@ -190,6 +197,7 @@ export async function executeHook<Name extends keyof Hooks>(options: HookExecuti
 				hookName,
 				status: "failed",
 				exitCode: errorInfo?.exitCode ?? 1,
+				scriptPaths: hookInfo.scriptPaths,
 				...(errorInfo && {
 					error: {
 						type: errorInfo.type,
