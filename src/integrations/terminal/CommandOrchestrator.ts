@@ -135,26 +135,18 @@ export async function orchestrateCommandExecution(
 						const trackingResult = onProceedWhileRunning(outputLines)
 						console.log(`[CommandOrchestrator] trackingResult: ${JSON.stringify(trackingResult)}`)
 
-						// Call continue() to resume the process
-						process.continue()
-
-						if (trackingResult?.logFilePath) {
-							// Send message to UI with the log file path
-							// This will be displayed in ChatRow with a clickable link
-							await callbacks.say("command_output", `\n📋 Output is being logged to: ${trackingResult.logFilePath}`)
-						}
-
-						// Clear timers
+						// Clear timers first
 						if (chunkTimer) {
 							clearTimeout(chunkTimer)
+							chunkTimer = null
 						}
 						if (completionTimer) {
 							clearTimeout(completionTimer)
+							completionTimer = null
 						}
 
-						// Set early return result - the background tracker will handle future output
-						// This prevents the orchestrator's listener from continuing to process lines
-						await setTimeoutPromise(50)
+						// Set early return result BEFORE resuming the process
+						// This prevents the orchestrator's listener from processing new lines
 						const result = terminalManager.processOutput(outputLines)
 						const logMsg = trackingResult?.logFilePath ? `Log file: ${trackingResult.logFilePath}\n` : ""
 						const outputMsg = result.length > 0 ? `Output so far:\n${result}` : ""
@@ -165,21 +157,35 @@ export async function orchestrateCommandExecution(
 							completed: false,
 							outputLines,
 						}
-						console.log(`[CommandOrchestrator] Set backgroundTrackingResult, returning from flushBuffer`)
-						// Don't call process.continue() again, we already did above
+						console.log(`[CommandOrchestrator] Set backgroundTrackingResult`)
+
+						// Send log file message to UI BEFORE resuming the process
+						// This ensures the message appears before any new output lines
+						if (trackingResult?.logFilePath) {
+							await callbacks.say("command_output", `\n📋 Output is being logged to: ${trackingResult.logFilePath}`)
+						}
+
+						// Now resume the process - any new lines will be handled by the background tracker
+						process.continue()
+
+						console.log(`[CommandOrchestrator] Returning from flushBuffer after background tracking setup`)
 						return
 					}
 
 					process.continue()
 				} else if (response === "noButtonClicked" && text === COMMAND_CANCEL_TOKEN) {
 					telemetryService.captureTerminalUserIntervention(TerminalUserInterventionAction.CANCELLED)
+					// Set flags BEFORE resuming the process to prevent new lines from being processed
 					didCancelViaUi = true
 					userFeedback = undefined
 					didContinue = true
-					process.continue()
 					outputBuffer = []
 					outputBufferSize = 0
+					// Send cancellation message BEFORE resuming the process
+					// This ensures the message appears before any new output lines
 					await callbacks.say("command_output", "Command cancelled")
+					// Now resume the process
+					process.continue()
 				} else {
 					userFeedback = { text, images, files }
 					didContinue = true
