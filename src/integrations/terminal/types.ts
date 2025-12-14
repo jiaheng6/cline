@@ -244,11 +244,39 @@ export interface StandaloneTerminalOptions {
 }
 
 // =============================================================================
+// Background Command Types
+// =============================================================================
+
+/**
+ * Represents a command running in the background after user clicked "Proceed While Running".
+ * Used by StandaloneTerminalManager to track background commands.
+ */
+export interface BackgroundCommand {
+	/** Unique identifier for the background command */
+	id: string
+	/** The command string being executed */
+	command: string
+	/** Timestamp when the command started */
+	startTime: number
+	/** Current status of the command */
+	status: "running" | "completed" | "error" | "timed_out"
+	/** Path to the log file where output is being written */
+	logFilePath: string
+	/** Number of lines written to the log file */
+	lineCount: number
+	/** Exit code if the command completed or errored */
+	exitCode?: number
+	/** The terminal process running the command */
+	process: TerminalProcessResultPromise
+}
+
+// =============================================================================
 // Command Executor Types
 // =============================================================================
 
 /**
  * Represents an active background command that can be cancelled
+ * @deprecated Use BackgroundCommand instead
  */
 export interface ActiveBackgroundCommand {
 	process: {

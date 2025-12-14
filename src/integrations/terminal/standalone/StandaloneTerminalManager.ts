@@ -15,26 +15,15 @@
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
-import type { ITerminalManager, TerminalInfo, TerminalProcessResultPromise } from "../types"
+import type { BackgroundCommand, ITerminalManager, TerminalInfo, TerminalProcessResultPromise } from "../types"
 import { StandaloneTerminalProcess } from "./StandaloneTerminalProcess"
 import { StandaloneTerminalRegistry } from "./StandaloneTerminalRegistry"
 
+// Re-export BackgroundCommand for backwards compatibility
+export type { BackgroundCommand }
+
 // 10 minute hard timeout for background commands
 const BACKGROUND_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
-
-/**
- * Represents a command running in the background after user clicked "Proceed While Running"
- */
-export interface BackgroundCommand {
-	id: string
-	command: string
-	startTime: number
-	status: "running" | "completed" | "error" | "timed_out"
-	logFilePath: string
-	lineCount: number
-	exitCode?: number
-	process: TerminalProcessResultPromise
-}
 
 /**
  * Helper function to merge a process with a promise for the TerminalProcessResultPromise type.
