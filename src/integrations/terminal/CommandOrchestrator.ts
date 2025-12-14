@@ -28,14 +28,11 @@ import type {
 } from "./types"
 
 // Chunked terminal output buffering constants
-export const CHUNK_LINE_COUNT = 20
-export const CHUNK_BYTE_SIZE = 2048 // 2KB
-export const CHUNK_DEBOUNCE_MS = 100
-export const BUFFER_STUCK_TIMEOUT_MS = 6000 // 6 seconds
-export const COMPLETION_TIMEOUT_MS = 6000 // 6 seconds
-
-// Re-export types for convenience
-export type { OrchestrationOptions, OrchestrationResult } from "./types"
+const CHUNK_LINE_COUNT = 20
+const CHUNK_BYTE_SIZE = 2048 // 2KB
+const CHUNK_DEBOUNCE_MS = 100
+const BUFFER_STUCK_TIMEOUT_MS = 6000 // 6 seconds
+const COMPLETION_TIMEOUT_MS = 6000 // 6 seconds
 
 /**
  * Orchestrate command execution with shared logic for buffering, user interaction, and result formatting.

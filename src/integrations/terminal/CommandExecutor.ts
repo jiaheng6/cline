@@ -21,18 +21,7 @@ import { telemetryService } from "@services/telemetry"
 import { ClineToolResponseContent } from "@shared/messages"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import { StandaloneTerminalManager } from "./standalone/StandaloneTerminalManager"
-import { CommandExecutorCallbacks, CommandExecutorConfig, ITerminalManager } from "./types"
-
-// Re-export types for convenience
-export type { CommandExecutorCallbacks, CommandExecutorConfig, FullCommandExecutorConfig } from "./types"
-
-/**
- * Tracker for shell integration warnings to determine when to show background terminal suggestion
- */
-interface ShellIntegrationWarningTracker {
-	timestamps: number[]
-	lastSuggestionShown?: number
-}
+import type { CommandExecutorCallbacks, CommandExecutorConfig, ITerminalManager, ShellIntegrationWarningTracker } from "./types"
 
 /**
  * CommandExecutor - Unified command executor for all terminal modes.

@@ -275,6 +275,17 @@ export interface BackgroundCommand {
 // =============================================================================
 
 /**
+ * Tracker for shell integration warnings to determine when to show background terminal suggestion.
+ * Used internally by CommandExecutor to track warning frequency.
+ */
+export interface ShellIntegrationWarningTracker {
+	/** Timestamps of recent shell integration warnings */
+	timestamps: number[]
+	/** Timestamp when the suggestion was last shown */
+	lastSuggestionShown?: number
+}
+
+/**
  * Represents an active background command that can be cancelled
  * @deprecated Use BackgroundCommand instead
  */
