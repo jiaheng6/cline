@@ -240,12 +240,16 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 	/**
 	 * Continue execution without waiting for completion.
-	 * Stops event emission and resolves the promise.
+	 * Emits "continue" event but keeps emitting "line" events for background tracking.
+	 *
+	 * Note: We intentionally do NOT call removeAllListeners("line") or set isListening=false
+	 * because background command tracking needs to continue receiving output lines
+	 * after the user clicks "Proceed While Running".
 	 */
 	continue(): void {
 		this.emitRemainingBuffer()
-		this.isListening = false
-		this.removeAllListeners("line")
+		// Keep isListening = true so we continue emitting "line" events
+		// This is needed for background command tracking to log output to file
 		this.emit("continue")
 	}
 

@@ -272,7 +272,6 @@ export class Task {
 		this.cancelTask = cancelTask
 		this.clineIgnoreController = new ClineIgnoreController(cwd)
 		this.taskLockAcquired = taskLockAcquired
-
 		// Determine terminal execution mode and create appropriate terminal manager
 		this.terminalExecutionMode = vscodeTerminalExecutionMode || "vscodeTerminal"
 
@@ -513,6 +512,10 @@ export class Task {
 			addToUserMessageContent: (content: { type: string; text: string }) => {
 				// Cast to ClineTextContentBlock which is compatible with ClineContent
 				this.taskState.userMessageContent.push({ type: "text", text: content.text } as ClineTextContentBlock)
+			},
+			getAskResponse: () => this.taskState.askResponse,
+			clearAskResponse: () => {
+				this.taskState.askResponse = undefined
 			},
 		}
 
@@ -3239,6 +3242,13 @@ export class Task {
 
 		if (terminalDetails) {
 			details += terminalDetails
+		}
+
+		// Add background command summary section (commands that user clicked "Proceed while running")
+		// The CommandExecutor delegates to StandaloneTerminalManager for background tracking
+		const backgroundSummary = this.commandExecutor.getBackgroundCommandSummary()
+		if (backgroundSummary) {
+			details += "\n\n" + backgroundSummary
 		}
 
 		// Add recently modified files section

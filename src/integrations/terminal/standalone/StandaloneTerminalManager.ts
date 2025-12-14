@@ -4,11 +4,37 @@
  * This class provides the same interface as VSCode's TerminalManager but works
  * in CLI and JetBrains environments by using subprocess management instead of
  * VSCode's terminal API.
+ *
+ * Also handles background command tracking for "Proceed While Running" functionality:
+ * - Logs output to temp files for later retrieval
+ * - Tracks command status (running, completed, error, timed_out)
+ * - Implements 10-minute hard timeout to prevent zombie processes
+ * - Provides summary for environment details
  */
 
+import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
 import type { ITerminalManager, TerminalInfo, TerminalProcessResultPromise } from "../types"
 import { StandaloneTerminalProcess } from "./StandaloneTerminalProcess"
 import { StandaloneTerminalRegistry } from "./StandaloneTerminalRegistry"
+
+// 10 minute hard timeout for background commands
+const BACKGROUND_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+
+/**
+ * Represents a command running in the background after user clicked "Proceed While Running"
+ */
+export interface BackgroundCommand {
+	id: string
+	command: string
+	startTime: number
+	status: "running" | "completed" | "error" | "timed_out"
+	logFilePath: string
+	lineCount: number
+	exitCode?: number
+	process: TerminalProcessResultPromise
+}
 
 /**
  * Helper function to merge a process with a promise for the TerminalProcessResultPromise type.
@@ -70,6 +96,19 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 	/** Default terminal profile */
 	private defaultTerminalProfile: string = "default"
+
+	// =========================================================================
+	// Background Command Tracking
+	// =========================================================================
+
+	/** Map of background command ID to command info */
+	private backgroundCommands: Map<string, BackgroundCommand> = new Map()
+
+	/** Map of background command ID to log file write stream */
+	private logStreams: Map<string, fs.WriteStream> = new Map()
+
+	/** Map of background command ID to timeout handle */
+	private backgroundTimeouts: Map<string, NodeJS.Timeout> = new Map()
 
 	/**
 	 * Run a command in the specified terminal.
@@ -213,6 +252,9 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	 * Dispose of all terminals and clean up resources.
 	 */
 	disposeAll(): void {
+		// Dispose background commands first
+		this.disposeBackgroundCommands()
+
 		// Terminate all processes
 		for (const [_terminalId, process] of this.processes) {
 			if (process && process.terminate) {
@@ -368,5 +410,222 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	 */
 	closeAllTerminals(): number {
 		return this.closeTerminals(() => true, true)
+	}
+
+	// =========================================================================
+	// Background Command Tracking Methods
+	// =========================================================================
+
+	/**
+	 * Track a command that will continue running in the background.
+	 * Called when user clicks "Proceed While Running".
+	 * Creates a log file and pipes output to it.
+	 * Sets up a 10-minute hard timeout to prevent zombie processes.
+	 *
+	 * @param process The terminal process to track
+	 * @param command The command string being executed
+	 * @param existingOutput Output lines already captured before tracking started
+	 * @returns The background command info with log file path
+	 */
+	trackBackgroundCommand(
+		process: TerminalProcessResultPromise,
+		command: string,
+		existingOutput: string[] = [],
+	): BackgroundCommand {
+		const id = `background-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+		const logFilePath = path.join(os.tmpdir(), `cline-${id}.log`)
+
+		console.log(`[StandaloneTerminalManager] trackBackgroundCommand called`)
+		console.log(`[StandaloneTerminalManager] - id: ${id}`)
+		console.log(`[StandaloneTerminalManager] - command: ${command.substring(0, 50)}...`)
+		console.log(`[StandaloneTerminalManager] - existingOutput lines: ${existingOutput.length}`)
+		console.log(`[StandaloneTerminalManager] - logFilePath: ${logFilePath}`)
+		console.log(`[StandaloneTerminalManager] - current backgroundCommands count: ${this.backgroundCommands.size}`)
+
+		const backgroundCommand: BackgroundCommand = {
+			id,
+			command,
+			startTime: Date.now(),
+			status: "running",
+			logFilePath,
+			lineCount: existingOutput.length,
+			process,
+		}
+
+		// Create write stream for log file
+		const logStream = fs.createWriteStream(logFilePath, { flags: "a" })
+		this.logStreams.set(id, logStream)
+
+		// Write existing output that was captured before tracking started
+		if (existingOutput.length > 0) {
+			console.log(`[StandaloneTerminalManager] Writing ${existingOutput.length} existing lines to log file`)
+			logStream.write(existingOutput.join("\n") + "\n")
+		}
+
+		// Pipe future process output to log file
+		console.log(`[StandaloneTerminalManager] Attaching line listener for future output`)
+		process.on("line", (line: string) => {
+			backgroundCommand.lineCount++
+			logStream.write(line + "\n")
+			if (backgroundCommand.lineCount <= 3 || backgroundCommand.lineCount % 20 === 0) {
+				console.log(
+					`[StandaloneTerminalManager] Background line ${backgroundCommand.lineCount}: ${line.substring(0, 30)}...`,
+				)
+			}
+		})
+
+		// Set up 10-minute hard timeout to prevent zombie processes
+		const timeoutId = setTimeout(() => {
+			if (backgroundCommand.status === "running") {
+				console.log(`[StandaloneTerminalManager] Hard timeout reached for background command ${id}, terminating...`)
+				backgroundCommand.status = "timed_out"
+				logStream.write("\n[TIMEOUT] Process killed after 10 minutes\n")
+				logStream.end()
+
+				// Terminate the process if it has a terminate method
+				if (process && typeof (process as any).terminate === "function") {
+					;(process as any).terminate()
+				}
+			}
+		}, BACKGROUND_COMMAND_TIMEOUT_MS)
+		this.backgroundTimeouts.set(id, timeoutId)
+
+		// Listen for completion - clear timeout
+		process.on("completed", () => {
+			console.log(`[StandaloneTerminalManager] Background command ${id} completed`)
+			const timeout = this.backgroundTimeouts.get(id)
+			if (timeout) {
+				clearTimeout(timeout)
+				this.backgroundTimeouts.delete(id)
+			}
+			backgroundCommand.status = "completed"
+			logStream.end()
+		})
+
+		// Listen for errors - clear timeout
+		process.on("error", (error: Error) => {
+			const timeout = this.backgroundTimeouts.get(id)
+			if (timeout) {
+				clearTimeout(timeout)
+				this.backgroundTimeouts.delete(id)
+			}
+			backgroundCommand.status = "error"
+			// Try to extract exit code from error message if available
+			const exitCodeMatch = error.message.match(/exit code (\d+)/)
+			if (exitCodeMatch) {
+				backgroundCommand.exitCode = parseInt(exitCodeMatch[1], 10)
+			}
+			logStream.end()
+		})
+
+		this.backgroundCommands.set(id, backgroundCommand)
+		console.log(`[StandaloneTerminalManager] Background command registered, total: ${this.backgroundCommands.size}`)
+		return backgroundCommand
+	}
+
+	/**
+	 * Get a specific background command by ID.
+	 */
+	getBackgroundCommand(id: string): BackgroundCommand | undefined {
+		return this.backgroundCommands.get(id)
+	}
+
+	/**
+	 * Get all tracked background commands.
+	 */
+	getAllBackgroundCommands(): BackgroundCommand[] {
+		return Array.from(this.backgroundCommands.values())
+	}
+
+	/**
+	 * Get only running background commands.
+	 */
+	getRunningBackgroundCommands(): BackgroundCommand[] {
+		return this.getAllBackgroundCommands().filter((c) => c.status === "running")
+	}
+
+	/**
+	 * Check if there are any active background commands.
+	 */
+	hasActiveBackgroundCommands(): boolean {
+		return this.getRunningBackgroundCommands().length > 0
+	}
+
+	/**
+	 * Cancel/terminate a specific background command.
+	 * @param id The background command ID to cancel
+	 * @returns true if cancelled, false if not found or already completed
+	 */
+	cancelBackgroundCommand(id: string): boolean {
+		const command = this.backgroundCommands.get(id)
+		if (!command || command.status !== "running") {
+			return false
+		}
+
+		// Clear timeout
+		const timeout = this.backgroundTimeouts.get(id)
+		if (timeout) {
+			clearTimeout(timeout)
+			this.backgroundTimeouts.delete(id)
+		}
+
+		// Close log stream
+		const logStream = this.logStreams.get(id)
+		if (logStream) {
+			logStream.write("\n[CANCELLED] Command cancelled by user\n")
+			logStream.end()
+			this.logStreams.delete(id)
+		}
+
+		// Terminate process
+		if (command.process && typeof (command.process as any).terminate === "function") {
+			;(command.process as any).terminate()
+		}
+
+		command.status = "error"
+		return true
+	}
+
+	/**
+	 * Get a summary string for environment details.
+	 * Shows running background commands with duration, line count, and log paths.
+	 */
+	getBackgroundCommandsSummary(): string {
+		const running = this.getRunningBackgroundCommands()
+		if (running.length === 0) {
+			return ""
+		}
+
+		const lines = [`# Background Commands (${running.length} running)`]
+		for (const c of running) {
+			const duration = Math.round((Date.now() - c.startTime) / 1000 / 60)
+			lines.push(`- ${c.command} (running ${duration}m, ${c.lineCount} lines, log: ${c.logFilePath})`)
+		}
+		return lines.join("\n")
+	}
+
+	/**
+	 * Clean up all background command resources.
+	 * Called when disposing the manager.
+	 */
+	disposeBackgroundCommands(): void {
+		// Clear all timeouts
+		for (const [_id, timeout] of this.backgroundTimeouts) {
+			clearTimeout(timeout)
+		}
+		this.backgroundTimeouts.clear()
+
+		// Close all log streams
+		for (const [_id, logStream] of this.logStreams) {
+			try {
+				logStream.end()
+			} catch (error) {
+				console.error(`[StandaloneTerminalManager] Error closing log stream:`, error)
+			}
+		}
+		this.logStreams.clear()
+
+		// Clear command tracking
+		this.backgroundCommands.clear()
 	}
 }

@@ -290,6 +290,10 @@ export interface CommandExecutorCallbacks {
 	getClineMessages: () => Array<{ ask?: string; say?: string }>
 	/** Add content to user message for next API request */
 	addToUserMessageContent: (content: { type: string; text: string }) => void
+	/** Get the current ask response state */
+	getAskResponse: () => string | undefined
+	/** Clear the ask response state */
+	clearAskResponse: () => void
 }
 
 /**
@@ -327,6 +331,13 @@ export interface OrchestrationOptions {
 	onOutputLine?: (line: string) => void
 	/** Whether to show shell integration warning with suggestion */
 	showShellIntegrationSuggestion?: boolean
+	/**
+	 * Callback invoked when user clicks "Proceed While Running".
+	 * Used to start background command tracking in the terminal manager.
+	 * @param existingOutput The output lines captured so far (to write to log file)
+	 * @returns The log file path if tracking was started, undefined otherwise
+	 */
+	onProceedWhileRunning?: (existingOutput: string[]) => { logFilePath: string } | undefined
 }
 
 /**
