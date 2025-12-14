@@ -21,7 +21,13 @@ import { telemetryService } from "@services/telemetry"
 import { ClineToolResponseContent } from "@shared/messages"
 import { orchestrateCommandExecution } from "./CommandOrchestrator"
 import { StandaloneTerminalManager } from "./standalone/StandaloneTerminalManager"
-import type { CommandExecutorCallbacks, CommandExecutorConfig, ITerminalManager, ShellIntegrationWarningTracker } from "./types"
+import type {
+	CommandExecutorCallbacks,
+	CommandExecutorConfig,
+	ITerminalManager,
+	ShellIntegrationWarningTracker,
+	TerminalProcessResultPromise,
+} from "./types"
 
 /**
  * CommandExecutor - Unified command executor for all terminal modes.
@@ -37,6 +43,9 @@ export class CommandExecutor {
 	private terminalManager: ITerminalManager
 	private standaloneManager: StandaloneTerminalManager
 	private callbacks: CommandExecutorCallbacks
+
+	// Track the currently executing foreground process for cancellation
+	private currentProcess: TerminalProcessResultPromise | null = null
 
 	// Track shell integration warnings to determine when to show background terminal suggestion
 	private shellIntegrationWarningTracker: ShellIntegrationWarningTracker = {
@@ -103,6 +112,14 @@ export class CommandExecutor {
 		terminalInfo.terminal.show()
 		const process = manager.runCommand(terminalInfo, command)
 
+		// Track the current process for cancellation
+		this.currentProcess = process
+		const clearCurrentProcess = () => {
+			this.currentProcess = null
+		}
+		process.once("completed", clearCurrentProcess)
+		process.once("error", clearCurrentProcess)
+
 		// Use shared orchestration logic
 		// The StandaloneTerminalManager handles background command tracking internally
 		const result = await orchestrateCommandExecution(process, manager, this.callbacks, {
@@ -130,18 +147,19 @@ export class CommandExecutor {
 	}
 
 	/**
-	 * Cancel all running background commands.
-	 * Delegates to StandaloneTerminalManager which tracks multiple commands.
+	 * Cancel all running commands (both foreground and background).
+	 *
+	 * This method cancels:
+	 * 1. All detached background commands (those that were "proceeded while running")
+	 * 2. The current foreground process (if one is actively running)
 	 *
 	 * @returns true if any commands were cancelled, false otherwise
 	 */
 	async cancelBackgroundCommand(): Promise<boolean> {
-		const runningCommands = this.standaloneManager.getRunningBackgroundCommands()
-		if (runningCommands.length === 0) {
-			return false
-		}
-
 		let cancelled = false
+
+		// 1. Cancel all detached background commands
+		const runningCommands = this.standaloneManager.getRunningBackgroundCommands()
 		for (const cmd of runningCommands) {
 			if (this.standaloneManager.cancelBackgroundCommand(cmd.id)) {
 				cancelled = true
@@ -149,10 +167,19 @@ export class CommandExecutor {
 			}
 		}
 
+		// 2. Cancel the current foreground process (if any)
+		if (this.currentProcess && typeof (this.currentProcess as any).terminate === "function") {
+			;(this.currentProcess as any).terminate()
+			this.currentProcess = null
+			cancelled = true
+			Logger.info("Cancelled foreground command")
+		}
+
+		// 3. Update UI state and notify user
 		if (cancelled) {
 			this.callbacks.updateBackgroundCommandState(false)
 			try {
-				await this.callbacks.say("command_output", "Background command(s) cancelled.")
+				await this.callbacks.say("command_output", "Command(s) cancelled.")
 			} catch (error) {
 				Logger.error("Failed to send cancellation notification", error)
 			}
