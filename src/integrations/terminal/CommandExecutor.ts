@@ -78,9 +78,6 @@ export class CommandExecutor {
 	 * @returns [userRejected, result] tuple
 	 */
 	async execute(command: string, timeoutSeconds: number | undefined): Promise<[boolean, ClineToolResponseContent]> {
-		console.log(`[CommandExecutor] execute() called with command: ${command.substring(0, 50)}...`)
-		console.log(`[CommandExecutor] terminalExecutionMode: ${this.terminalExecutionMode}`)
-
 		// Transform subagent commands to ensure flags are correct
 		const isSubagent = isSubagentCommand(command)
 		if (isSubagent) {
@@ -99,19 +96,12 @@ export class CommandExecutor {
 		// Subagents always use standalone manager (hidden terminal)
 		const useStandalone = isSubagent || this.terminalExecutionMode === "backgroundExec"
 		const manager = useStandalone ? this.standaloneManager : this.terminalManager
-
-		console.log(`[CommandExecutor] useStandalone: ${useStandalone}`)
-		console.log(`[CommandExecutor] standaloneManager instance: ${this.standaloneManager.constructor.name}`)
-		console.log(`[CommandExecutor] Current background commands: ${this.standaloneManager.getAllBackgroundCommands().length}`)
-
 		Logger.info(`Executing command in ${useStandalone ? "standalone" : "VSCode"} terminal: ${command}`)
 
 		// Get terminal and run command
 		const terminalInfo = await manager.getOrCreateTerminal(this.cwd)
-		console.log(`[CommandExecutor] Got terminal ${terminalInfo.id}, busy: ${terminalInfo.busy}`)
 		terminalInfo.terminal.show()
 		const process = manager.runCommand(terminalInfo, command)
-		console.log(`[CommandExecutor] Process started`)
 
 		// Use shared orchestration logic
 		// The StandaloneTerminalManager handles background command tracking internally
@@ -123,19 +113,12 @@ export class CommandExecutor {
 			// existingOutput contains all output lines captured so far
 			onProceedWhileRunning: useStandalone
 				? (existingOutput: string[]) => {
-						console.log(
-							`[CommandExecutor] onProceedWhileRunning callback invoked with ${existingOutput.length} lines`,
-						)
 						const backgroundCmd = this.standaloneManager.trackBackgroundCommand(process, command, existingOutput)
-						console.log(`[CommandExecutor] trackBackgroundCommand returned: ${backgroundCmd.id}`)
 						return { logFilePath: backgroundCmd.logFilePath }
 					}
 				: undefined,
 			showShellIntegrationSuggestion: this.shouldShowBackgroundTerminalSuggestion(),
 		})
-
-		console.log(`[CommandExecutor] orchestrateCommandExecution returned, completed: ${result.completed}`)
-		console.log(`[CommandExecutor] Background commands after: ${this.standaloneManager.getAllBackgroundCommands().length}`)
 
 		// Capture subagent telemetry
 		if (isSubagent && subAgentStartTime > 0) {
