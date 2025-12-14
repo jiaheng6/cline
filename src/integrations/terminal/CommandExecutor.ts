@@ -47,6 +47,9 @@ export class CommandExecutor {
 	// Track the currently executing foreground process for cancellation
 	private currentProcess: TerminalProcessResultPromise | null = null
 
+	// Flag to track if the current command was cancelled externally
+	private wasCancelledExternally = false
+
 	// Track shell integration warnings to determine when to show background terminal suggestion
 	private shellIntegrationWarningTracker: ShellIntegrationWarningTracker = {
 		timestamps: [],
@@ -112,7 +115,8 @@ export class CommandExecutor {
 		terminalInfo.terminal.show()
 		const process = manager.runCommand(terminalInfo, command)
 
-		// Track the current process for cancellation
+		// Reset cancellation flag and track the current process
+		this.wasCancelledExternally = false
 		this.currentProcess = process
 		const clearCurrentProcess = () => {
 			this.currentProcess = null
@@ -143,6 +147,16 @@ export class CommandExecutor {
 			telemetryService.captureSubagentExecution(this.ulid, durationMs, result.outputLines.length, result.completed)
 		}
 
+		// If the command was cancelled externally (via cancel button), return a clear cancellation message
+		// This ensures the AI agent knows the command was cancelled by the user
+		if (this.wasCancelledExternally) {
+			const outputSoFar =
+				result.outputLines.length > 0
+					? `\nOutput captured before cancellation:\n${manager.processOutput(result.outputLines)}`
+					: ""
+			return [true, `Command was cancelled by the user.${outputSoFar}`]
+		}
+
 		return [result.userRejected, result.result]
 	}
 
@@ -169,6 +183,8 @@ export class CommandExecutor {
 
 		// 2. Cancel the current foreground process (if any)
 		if (this.currentProcess && typeof (this.currentProcess as any).terminate === "function") {
+			// Set flag so execute() knows the command was cancelled externally
+			this.wasCancelledExternally = true
 			;(this.currentProcess as any).terminate()
 			this.currentProcess = null
 			cancelled = true
@@ -179,7 +195,7 @@ export class CommandExecutor {
 		if (cancelled) {
 			this.callbacks.updateBackgroundCommandState(false)
 			try {
-				await this.callbacks.say("command_output", "Command(s) cancelled.")
+				await this.callbacks.say("command_output", "Command(s) cancelled by user.")
 			} catch (error) {
 				Logger.error("Failed to send cancellation notification", error)
 			}
