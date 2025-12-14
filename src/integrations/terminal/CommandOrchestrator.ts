@@ -308,9 +308,8 @@ export async function orchestrateCommandExecution(
 				if (error.message === "COMMAND_TIMEOUT") {
 					// Timeout triggers "Proceed While Running" behavior
 					didContinue = true
-					process.continue()
 
-					// Clear all our timers
+					// Clear all our timers first
 					if (chunkTimer) {
 						clearTimeout(chunkTimer)
 						chunkTimer = null
@@ -319,6 +318,48 @@ export async function orchestrateCommandExecution(
 						clearTimeout(completionTimer)
 						completionTimer = null
 					}
+
+					// If background tracking is available (standalone mode only), use it
+					// This writes output to a log file and detaches the command
+					if (onProceedWhileRunning) {
+						console.log(
+							`[CommandOrchestrator] Timeout: Calling onProceedWhileRunning with ${outputLines.length} existing lines`,
+						)
+						const trackingResult = onProceedWhileRunning(outputLines)
+						console.log(`[CommandOrchestrator] Timeout trackingResult: ${JSON.stringify(trackingResult)}`)
+
+						// Set early return result BEFORE resuming the process
+						// This prevents the orchestrator's listener from processing new lines
+						const result = terminalManager.processOutput(outputLines)
+						const logMsg = trackingResult?.logFilePath ? `Log file: ${trackingResult.logFilePath}\n` : ""
+						const outputMsg = result.length > 0 ? `Output so far:\n${result}` : ""
+
+						backgroundTrackingResult = {
+							userRejected: false,
+							result: `Command timed out after ${timeoutSeconds} seconds. Running in background.\n${logMsg}${outputMsg}`,
+							completed: false,
+							outputLines,
+						}
+						console.log(`[CommandOrchestrator] Timeout: Set backgroundTrackingResult`)
+
+						// Send log file message to UI BEFORE resuming the process
+						if (trackingResult?.logFilePath) {
+							await callbacks.say(
+								"command_output",
+								`\n⏱️ Command timed out. Output is being logged to: ${trackingResult.logFilePath}`,
+							)
+						}
+
+						// Now resume the process - any new lines will be handled by the background tracker
+						process.continue()
+
+						console.log(`[CommandOrchestrator] Timeout: Returning with background tracking`)
+						return backgroundTrackingResult
+					}
+
+					// VSCode terminal mode: no background tracking available
+					// Just continue the process and return timeout result
+					process.continue()
 
 					// Process any output we captured before timeout
 					await setTimeoutPromise(50)
