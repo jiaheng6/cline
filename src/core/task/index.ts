@@ -513,10 +513,6 @@ export class Task {
 				// Cast to ClineTextContentBlock which is compatible with ClineContent
 				this.taskState.userMessageContent.push({ type: "text", text: content.text } as ClineTextContentBlock)
 			},
-			getAskResponse: () => this.taskState.askResponse,
-			clearAskResponse: () => {
-				this.taskState.askResponse = undefined
-			},
 		}
 
 		this.commandExecutor = new CommandExecutor(commandExecutorConfig, commandExecutorCallbacks)

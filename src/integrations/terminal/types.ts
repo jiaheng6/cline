@@ -290,10 +290,6 @@ export interface CommandExecutorCallbacks {
 	getClineMessages: () => Array<{ ask?: string; say?: string }>
 	/** Add content to user message for next API request */
 	addToUserMessageContent: (content: { type: string; text: string }) => void
-	/** Get the current ask response state */
-	getAskResponse: () => string | undefined
-	/** Clear the ask response state */
-	clearAskResponse: () => void
 }
 
 /**
