@@ -387,4 +387,6 @@ export interface OrchestrationResult {
 	completed: boolean
 	/** All output lines captured */
 	outputLines: string[]
+	/** Path to log file if output was too large and written to file */
+	logFilePath?: string
 }

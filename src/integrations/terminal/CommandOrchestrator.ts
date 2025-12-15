@@ -19,6 +19,9 @@ import { processFilesIntoText } from "@integrations/misc/extract-text"
 import { Logger } from "@services/logging/Logger"
 import { TerminalHangStage, TerminalUserInterventionAction, telemetryService } from "@services/telemetry"
 import { COMMAND_CANCEL_TOKEN } from "@shared/ExtensionMessage"
+import * as fs from "fs"
+import * as os from "os"
+import * as path from "path"
 import type {
 	CommandExecutorCallbacks,
 	ITerminalManager,
@@ -33,6 +36,11 @@ const CHUNK_BYTE_SIZE = 2048 // 2KB
 const CHUNK_DEBOUNCE_MS = 100
 const BUFFER_STUCK_TIMEOUT_MS = 6000 // 6 seconds
 const COMPLETION_TIMEOUT_MS = 6000 // 6 seconds
+
+// Large output protection constants
+const MAX_LINES_BEFORE_FILE = 1000 // Switch to file-based logging after this many lines
+const MAX_BYTES_BEFORE_FILE = 512 * 1024 // 512KB threshold
+const SUMMARY_LINES_TO_KEEP = 100 // Lines to keep at start/end for summary
 
 /**
  * Orchestrate command execution with shared logic for buffering, user interaction, and result formatting.
@@ -217,6 +225,56 @@ export async function orchestrateCommandExecution(
 		chunkTimer = setTimeout(async () => await flushBuffer(), CHUNK_DEBOUNCE_MS)
 	}
 
+	// Large output file-based logging state
+	let isWritingToFile = false
+	let largeOutputLogPath: string | null = null
+	let largeOutputLogStream: fs.WriteStream | null = null
+	let totalOutputBytes = 0
+	let totalLineCount = 0
+	let firstLines: string[] = [] // Keep first N lines for summary
+	let lastLines: string[] = [] // Keep last N lines for summary (circular buffer)
+
+	/**
+	 * Switch to file-based logging when output is too large.
+	 * This protects against memory exhaustion from commands with huge output.
+	 */
+	const switchToFileBased = async () => {
+		if (isWritingToFile) return
+
+		isWritingToFile = true
+		largeOutputLogPath = path.join(os.tmpdir(), `cline-large-output-${Date.now()}.log`)
+		largeOutputLogStream = fs.createWriteStream(largeOutputLogPath, { flags: "a" })
+
+		console.log(`[CommandOrchestrator] Switching to file-based logging: ${largeOutputLogPath}`)
+
+		// Write all existing lines to file
+		for (const line of outputLines) {
+			largeOutputLogStream.write(line + "\n")
+		}
+
+		// Keep first N lines for summary
+		firstLines = outputLines.slice(0, SUMMARY_LINES_TO_KEEP)
+
+		// Keep last N lines for summary (will be updated as more lines come in)
+		lastLines = outputLines.slice(-SUMMARY_LINES_TO_KEEP)
+
+		// Notify user
+		await callbacks.say(
+			"command_output",
+			`\n📋 Output is large (${outputLines.length} lines, ${Math.round(totalOutputBytes / 1024)}KB). Writing to: ${largeOutputLogPath}`,
+		)
+	}
+
+	/**
+	 * Clean up file-based logging resources.
+	 */
+	const cleanupFileBased = () => {
+		if (largeOutputLogStream) {
+			largeOutputLogStream.end()
+			largeOutputLogStream = null
+		}
+	}
+
 	const outputLines: string[] = []
 	process.on("line", async (line: string) => {
 		if (didCancelViaUi) {
@@ -231,9 +289,39 @@ export async function orchestrateCommandExecution(
 			return
 		}
 
-		outputLines.push(line)
-		if (outputLines.length <= 3 || outputLines.length % 20 === 0) {
-			console.log(`[CommandOrchestrator] Line ${outputLines.length}: ${line.substring(0, 50)}...`)
+		const lineBytes = Buffer.byteLength(line, "utf8")
+		totalOutputBytes += lineBytes
+		totalLineCount++
+
+		// Check if we should switch to file-based logging
+		if (!isWritingToFile && (outputLines.length >= MAX_LINES_BEFORE_FILE || totalOutputBytes >= MAX_BYTES_BEFORE_FILE)) {
+			await switchToFileBased()
+		}
+
+		if (isWritingToFile) {
+			// Write to file instead of keeping in memory
+			if (largeOutputLogStream) {
+				largeOutputLogStream.write(line + "\n")
+			}
+
+			// Update last lines circular buffer for summary
+			lastLines.push(line)
+			if (lastLines.length > SUMMARY_LINES_TO_KEEP) {
+				lastLines.shift()
+			}
+
+			// Log progress periodically
+			if (totalLineCount % 1000 === 0) {
+				console.log(
+					`[CommandOrchestrator] Large output progress: ${totalLineCount} lines, ${Math.round(totalOutputBytes / 1024)}KB`,
+				)
+			}
+		} else {
+			// Normal behavior - keep in memory
+			outputLines.push(line)
+			if (outputLines.length <= 3 || outputLines.length % 20 === 0) {
+				console.log(`[CommandOrchestrator] Line ${outputLines.length}: ${line.substring(0, 50)}...`)
+			}
 		}
 
 		// Notify caller about output line (for background command tracking)
@@ -241,19 +329,25 @@ export async function orchestrateCommandExecution(
 			onOutputLine(line)
 		}
 
-		// Apply buffered streaming
+		// Apply buffered streaming (only if not in file mode or still showing initial output)
 		if (!didContinue) {
-			outputBuffer.push(line)
-			outputBufferSize += Buffer.byteLength(line, "utf8")
-			// Flush if buffer is large enough
-			if (outputBuffer.length >= CHUNK_LINE_COUNT || outputBufferSize >= CHUNK_BYTE_SIZE) {
-				await flushBuffer()
-			} else {
-				scheduleFlush()
+			if (!isWritingToFile) {
+				outputBuffer.push(line)
+				outputBufferSize += lineBytes
+				// Flush if buffer is large enough
+				if (outputBuffer.length >= CHUNK_LINE_COUNT || outputBufferSize >= CHUNK_BYTE_SIZE) {
+					await flushBuffer()
+				} else {
+					scheduleFlush()
+				}
 			}
+			// When in file mode, we've already notified the user, so don't keep buffering
 		} else {
 			// After "Proceed While Running" (without background tracking): stream output directly to UI
-			await callbacks.say("command_output", line)
+			// But throttle if we're in file mode to avoid flooding UI
+			if (!isWritingToFile) {
+				await callbacks.say("command_output", line)
+			}
 		}
 	})
 
@@ -398,7 +492,23 @@ export async function orchestrateCommandExecution(
 	// Wait for a short delay to ensure all messages are sent to the webview
 	await setTimeoutPromise(50)
 
-	const result = terminalManager.processOutput(outputLines)
+	// Clean up file-based logging if active
+	cleanupFileBased()
+
+	// Build result based on whether we used file-based logging
+	let result: string
+	let resultOutputLines: string[]
+
+	if (isWritingToFile) {
+		// Build summary from first and last lines
+		const skippedLines = totalLineCount - firstLines.length - lastLines.length
+		const summaryLines = [...firstLines, `\n... (${skippedLines} lines written to ${largeOutputLogPath}) ...\n`, ...lastLines]
+		result = terminalManager.processOutput(summaryLines)
+		resultOutputLines = summaryLines
+	} else {
+		result = terminalManager.processOutput(outputLines)
+		resultOutputLines = outputLines
+	}
 
 	if (didCancelViaUi) {
 		return {
@@ -407,7 +517,8 @@ export async function orchestrateCommandExecution(
 				`Command cancelled. ${result.length > 0 ? `\nOutput captured before cancellation:\n${result}` : ""}`,
 			),
 			completed: false,
-			outputLines,
+			outputLines: resultOutputLines,
+			logFilePath: largeOutputLogPath || undefined,
 		}
 	}
 
@@ -429,25 +540,30 @@ export async function orchestrateCommandExecution(
 				fileContentString,
 			),
 			completed: false,
-			outputLines,
+			outputLines: resultOutputLines,
+			logFilePath: largeOutputLogPath || undefined,
 		}
 	}
 
 	if (completed) {
+		const logFileMsg = largeOutputLogPath ? `\nFull output saved to: ${largeOutputLogPath}` : ""
 		return {
 			userRejected: false,
-			result: `Command executed.${result.length > 0 ? `\nOutput:\n${result}` : ""}`,
+			result: `Command executed.${result.length > 0 ? `\nOutput:\n${result}` : ""}${logFileMsg}`,
 			completed: true,
-			outputLines,
+			outputLines: resultOutputLines,
+			logFilePath: largeOutputLogPath || undefined,
 		}
 	} else {
+		const logFileMsg = largeOutputLogPath ? `\nFull output saved to: ${largeOutputLogPath}` : ""
 		return {
 			userRejected: false,
 			result: `Command is still running in the user's terminal.${
 				result.length > 0 ? `\nHere's the output so far:\n${result}` : ""
-			}\n\nYou will be updated on the terminal status and new output in the future.`,
+			}${logFileMsg}\n\nYou will be updated on the terminal status and new output in the future.`,
 			completed: false,
-			outputLines,
+			outputLines: resultOutputLines,
+			logFilePath: largeOutputLogPath || undefined,
 		}
 	}
 }

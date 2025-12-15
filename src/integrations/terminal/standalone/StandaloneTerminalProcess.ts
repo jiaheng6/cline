@@ -39,6 +39,15 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 	/** Full output captured from the process */
 	private fullOutput: string = ""
 
+	/** Maximum size for fullOutput to prevent memory exhaustion (1MB) */
+	private static readonly MAX_FULL_OUTPUT_SIZE = 1024 * 1024
+
+	/** Maximum lines to return from getUnretrievedOutput */
+	private static readonly MAX_UNRETRIEVED_LINES = 500
+
+	/** Lines to keep at start/end when truncating */
+	private static readonly TRUNCATE_KEEP_LINES = 100
+
 	/** Index of last retrieved output position */
 	private lastRetrievedIndex: number = 0
 
@@ -205,8 +214,19 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			console.log(`[StandaloneTerminalProcess.isHot] Timer expired, setting isHot=false`)
 		}, hotTimeout)
 
-		// Store full output
+		// Store full output with size cap to prevent memory exhaustion
 		this.fullOutput += data
+
+		// Cap fullOutput at MAX_FULL_OUTPUT_SIZE to prevent memory exhaustion
+		if (this.fullOutput.length > StandaloneTerminalProcess.MAX_FULL_OUTPUT_SIZE) {
+			// Keep last half of max size
+			this.fullOutput = this.fullOutput.slice(-StandaloneTerminalProcess.MAX_FULL_OUTPUT_SIZE / 2)
+			// Reset lastRetrievedIndex since we truncated the beginning
+			this.lastRetrievedIndex = 0
+			console.log(
+				`[StandaloneTerminalProcess] fullOutput exceeded ${StandaloneTerminalProcess.MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
+			)
+		}
 
 		if (this.isListening) {
 			this.emitLines(data)
@@ -258,11 +278,25 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 	/**
 	 * Get output that hasn't been retrieved yet.
-	 * @returns The unretrieved output
+	 * Truncates if output is too large to prevent context window overflow.
+	 * @returns The unretrieved output (truncated if necessary)
 	 */
 	getUnretrievedOutput(): string {
 		const unretrieved = this.fullOutput.slice(this.lastRetrievedIndex)
 		this.lastRetrievedIndex = this.fullOutput.length
+
+		// Truncate if too many lines to prevent context overflow
+		const lines = unretrieved.split("\n")
+		if (lines.length > StandaloneTerminalProcess.MAX_UNRETRIEVED_LINES) {
+			const first = lines.slice(0, StandaloneTerminalProcess.TRUNCATE_KEEP_LINES)
+			const last = lines.slice(-StandaloneTerminalProcess.TRUNCATE_KEEP_LINES)
+			const skipped = lines.length - first.length - last.length
+			console.log(
+				`[StandaloneTerminalProcess] getUnretrievedOutput truncating ${lines.length} lines to ${first.length + last.length} lines`,
+			)
+			return this.removeLastLineArtifacts([...first, `\n... (${skipped} lines truncated) ...\n`, ...last].join("\n"))
+		}
+
 		return this.removeLastLineArtifacts(unretrieved)
 	}
 

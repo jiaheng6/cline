@@ -33,6 +33,15 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 	isHot: boolean = false
 	private hotTimer: NodeJS.Timeout | null = null
 
+	/** Maximum size for fullOutput to prevent memory exhaustion (1MB) */
+	private static readonly MAX_FULL_OUTPUT_SIZE = 1024 * 1024
+
+	/** Maximum lines to return from getUnretrievedOutput */
+	private static readonly MAX_UNRETRIEVED_LINES = 500
+
+	/** Lines to keep at start/end when truncating */
+	private static readonly TRUNCATE_KEEP_LINES = 100
+
 	async run(terminal: vscode.Terminal, command: string) {
 		// When command does not produce any output, we can assume the shell integration API failed and as a fallback return the current terminal contents
 		const returnCurrentTerminalContents = async () => {
@@ -189,6 +198,18 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 				}
 
 				this.fullOutput += data
+
+				// Cap fullOutput at MAX_FULL_OUTPUT_SIZE to prevent memory exhaustion
+				if (this.fullOutput.length > VscodeTerminalProcess.MAX_FULL_OUTPUT_SIZE) {
+					// Keep last half of max size
+					this.fullOutput = this.fullOutput.slice(-VscodeTerminalProcess.MAX_FULL_OUTPUT_SIZE / 2)
+					// Reset lastRetrievedIndex since we truncated the beginning
+					this.lastRetrievedIndex = 0
+					console.log(
+						`[VscodeTerminalProcess] fullOutput exceeded ${VscodeTerminalProcess.MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
+					)
+				}
+
 				if (this.isListening) {
 					this.emitIfEol(data)
 					this.lastRetrievedIndex = this.fullOutput.length - this.buffer.length
@@ -285,9 +306,27 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 		this.emit("continue")
 	}
 
+	/**
+	 * Get output that hasn't been retrieved yet.
+	 * Truncates if output is too large to prevent context window overflow.
+	 * @returns The unretrieved output (truncated if necessary)
+	 */
 	getUnretrievedOutput(): string {
 		const unretrieved = this.fullOutput.slice(this.lastRetrievedIndex)
 		this.lastRetrievedIndex = this.fullOutput.length
+
+		// Truncate if too many lines to prevent context overflow
+		const lines = unretrieved.split("\n")
+		if (lines.length > VscodeTerminalProcess.MAX_UNRETRIEVED_LINES) {
+			const first = lines.slice(0, VscodeTerminalProcess.TRUNCATE_KEEP_LINES)
+			const last = lines.slice(-VscodeTerminalProcess.TRUNCATE_KEEP_LINES)
+			const skipped = lines.length - first.length - last.length
+			console.log(
+				`[VscodeTerminalProcess] getUnretrievedOutput truncating ${lines.length} lines to ${first.length + last.length} lines`,
+			)
+			return this.removeLastLineArtifacts([...first, `\n... (${skipped} lines truncated) ...\n`, ...last].join("\n"))
+		}
+
 		return this.removeLastLineArtifacts(unretrieved)
 	}
 
