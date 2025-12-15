@@ -3,11 +3,16 @@ import { EventEmitter } from "events"
 import * as vscode from "vscode"
 import { stripAnsi } from "@/hosts/vscode/terminal/ansiUtils"
 import { getLatestTerminalOutput } from "@/hosts/vscode/terminal/get-latest-output"
+import {
+	COMPILING_MARKERS,
+	COMPILING_NULLIFIERS,
+	MAX_FULL_OUTPUT_SIZE,
+	MAX_UNRETRIEVED_LINES,
+	PROCESS_HOT_TIMEOUT_COMPILING,
+	PROCESS_HOT_TIMEOUT_NORMAL,
+	TRUNCATE_KEEP_LINES,
+} from "@/integrations/terminal/constants"
 import type { ITerminalProcess, TerminalProcessEvents } from "@/integrations/terminal/types"
-
-// how long to wait after a process outputs anything before we consider it "cool" again
-const PROCESS_HOT_TIMEOUT_NORMAL = 2_000
-const PROCESS_HOT_TIMEOUT_COMPILING = 15_000
 
 /**
  * VscodeTerminalProcess - Manages command execution in VSCode's integrated terminal.
@@ -32,15 +37,6 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 	private lastRetrievedIndex: number = 0
 	isHot: boolean = false
 	private hotTimer: NodeJS.Timeout | null = null
-
-	/** Maximum size for fullOutput to prevent memory exhaustion (1MB) */
-	private static readonly MAX_FULL_OUTPUT_SIZE = 1024 * 1024
-
-	/** Maximum lines to return from getUnretrievedOutput */
-	private static readonly MAX_UNRETRIEVED_LINES = 500
-
-	/** Lines to keep at start/end when truncating */
-	private static readonly TRUNCATE_KEEP_LINES = 100
 
 	async run(terminal: vscode.Terminal, command: string) {
 		// When command does not produce any output, we can assume the shell integration API failed and as a fallback return the current terminal contents
@@ -165,24 +161,9 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 					clearTimeout(this.hotTimer)
 				}
 				// these markers indicate the command is some kind of local dev server recompiling the app, which we want to wait for output of before sending request to cline
-				const compilingMarkers = ["compiling", "building", "bundling", "transpiling", "generating", "starting"]
-				const markerNullifiers = [
-					"compiled",
-					"success",
-					"finish",
-					"complete",
-					"succeed",
-					"done",
-					"end",
-					"stop",
-					"exit",
-					"terminate",
-					"error",
-					"fail",
-				]
 				const isCompiling =
-					compilingMarkers.some((marker) => data.toLowerCase().includes(marker.toLowerCase())) &&
-					!markerNullifiers.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
+					COMPILING_MARKERS.some((marker) => data.toLowerCase().includes(marker.toLowerCase())) &&
+					!COMPILING_NULLIFIERS.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
 				this.hotTimer = setTimeout(
 					() => {
 						this.isHot = false
@@ -200,13 +181,13 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 				this.fullOutput += data
 
 				// Cap fullOutput at MAX_FULL_OUTPUT_SIZE to prevent memory exhaustion
-				if (this.fullOutput.length > VscodeTerminalProcess.MAX_FULL_OUTPUT_SIZE) {
+				if (this.fullOutput.length > MAX_FULL_OUTPUT_SIZE) {
 					// Keep last half of max size
-					this.fullOutput = this.fullOutput.slice(-VscodeTerminalProcess.MAX_FULL_OUTPUT_SIZE / 2)
+					this.fullOutput = this.fullOutput.slice(-MAX_FULL_OUTPUT_SIZE / 2)
 					// Reset lastRetrievedIndex since we truncated the beginning
 					this.lastRetrievedIndex = 0
 					console.log(
-						`[VscodeTerminalProcess] fullOutput exceeded ${VscodeTerminalProcess.MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
+						`[VscodeTerminalProcess] fullOutput exceeded ${MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
 					)
 				}
 
@@ -317,9 +298,9 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 
 		// Truncate if too many lines to prevent context overflow
 		const lines = unretrieved.split("\n")
-		if (lines.length > VscodeTerminalProcess.MAX_UNRETRIEVED_LINES) {
-			const first = lines.slice(0, VscodeTerminalProcess.TRUNCATE_KEEP_LINES)
-			const last = lines.slice(-VscodeTerminalProcess.TRUNCATE_KEEP_LINES)
+		if (lines.length > MAX_UNRETRIEVED_LINES) {
+			const first = lines.slice(0, TRUNCATE_KEEP_LINES)
+			const last = lines.slice(-TRUNCATE_KEEP_LINES)
 			const skipped = lines.length - first.length - last.length
 			console.log(
 				`[VscodeTerminalProcess] getUnretrievedOutput truncating ${lines.length} lines to ${first.length + last.length} lines`,

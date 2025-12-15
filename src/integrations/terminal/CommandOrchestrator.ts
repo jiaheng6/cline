@@ -22,6 +22,16 @@ import { COMMAND_CANCEL_TOKEN } from "@shared/ExtensionMessage"
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
+import {
+	BUFFER_STUCK_TIMEOUT_MS,
+	CHUNK_BYTE_SIZE,
+	CHUNK_DEBOUNCE_MS,
+	CHUNK_LINE_COUNT,
+	COMPLETION_TIMEOUT_MS,
+	MAX_BYTES_BEFORE_FILE,
+	MAX_LINES_BEFORE_FILE,
+	SUMMARY_LINES_TO_KEEP,
+} from "./constants"
 import type {
 	CommandExecutorCallbacks,
 	ITerminalManager,
@@ -29,18 +39,6 @@ import type {
 	OrchestrationResult,
 	TerminalProcessResultPromise,
 } from "./types"
-
-// Chunked terminal output buffering constants
-const CHUNK_LINE_COUNT = 20
-const CHUNK_BYTE_SIZE = 2048 // 2KB
-const CHUNK_DEBOUNCE_MS = 100
-const BUFFER_STUCK_TIMEOUT_MS = 6000 // 6 seconds
-const COMPLETION_TIMEOUT_MS = 6000 // 6 seconds
-
-// Large output protection constants
-const MAX_LINES_BEFORE_FILE = 1000 // Switch to file-based logging after this many lines
-const MAX_BYTES_BEFORE_FILE = 512 * 1024 // 512KB threshold
-const SUMMARY_LINES_TO_KEEP = 100 // Lines to keep at start/end for summary
 
 /**
  * Orchestrate command execution with shared logic for buffering, user interaction, and result formatting.

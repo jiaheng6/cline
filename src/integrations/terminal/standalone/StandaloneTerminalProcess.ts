@@ -11,11 +11,16 @@
 import { ChildProcess, spawn } from "child_process"
 import { EventEmitter } from "events"
 
+import {
+	COMPILING_MARKERS,
+	COMPILING_NULLIFIERS,
+	MAX_FULL_OUTPUT_SIZE,
+	MAX_UNRETRIEVED_LINES,
+	PROCESS_HOT_TIMEOUT_COMPILING,
+	PROCESS_HOT_TIMEOUT_NORMAL,
+	TRUNCATE_KEEP_LINES,
+} from "../constants"
 import type { ITerminal, ITerminalProcess, TerminalProcessEvents } from "../types"
-
-// How long to wait after a process outputs anything before we consider it "cool" again
-const PROCESS_HOT_TIMEOUT_NORMAL = 2_000
-const PROCESS_HOT_TIMEOUT_COMPILING = 15_000
 
 /**
  * Manages the execution of a command in a standalone terminal environment.
@@ -42,15 +47,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 	/** Full output captured from the process */
 	private fullOutput: string = ""
-
-	/** Maximum size for fullOutput to prevent memory exhaustion (1MB) */
-	private static readonly MAX_FULL_OUTPUT_SIZE = 1024 * 1024
-
-	/** Maximum lines to return from getUnretrievedOutput */
-	private static readonly MAX_UNRETRIEVED_LINES = 500
-
-	/** Lines to keep at start/end when truncating */
-	private static readonly TRUNCATE_KEEP_LINES = 100
 
 	/** Index of last retrieved output position */
 	private lastRetrievedIndex: number = 0
@@ -189,25 +185,9 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 		}
 
 		// Check for compilation markers to adjust hot timeout
-		const compilingMarkers = ["compiling", "building", "bundling", "transpiling", "generating", "starting"]
-		const markerNullifiers = [
-			"compiled",
-			"success",
-			"finish",
-			"complete",
-			"succeed",
-			"done",
-			"end",
-			"stop",
-			"exit",
-			"terminate",
-			"error",
-			"fail",
-		]
-
 		const isCompiling =
-			compilingMarkers.some((marker) => data.toLowerCase().includes(marker.toLowerCase())) &&
-			!markerNullifiers.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
+			COMPILING_MARKERS.some((marker) => data.toLowerCase().includes(marker.toLowerCase())) &&
+			!COMPILING_NULLIFIERS.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
 
 		const hotTimeout = isCompiling ? PROCESS_HOT_TIMEOUT_COMPILING : PROCESS_HOT_TIMEOUT_NORMAL
 		console.log(
@@ -222,13 +202,13 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 		this.fullOutput += data
 
 		// Cap fullOutput at MAX_FULL_OUTPUT_SIZE to prevent memory exhaustion
-		if (this.fullOutput.length > StandaloneTerminalProcess.MAX_FULL_OUTPUT_SIZE) {
+		if (this.fullOutput.length > MAX_FULL_OUTPUT_SIZE) {
 			// Keep last half of max size
-			this.fullOutput = this.fullOutput.slice(-StandaloneTerminalProcess.MAX_FULL_OUTPUT_SIZE / 2)
+			this.fullOutput = this.fullOutput.slice(-MAX_FULL_OUTPUT_SIZE / 2)
 			// Reset lastRetrievedIndex since we truncated the beginning
 			this.lastRetrievedIndex = 0
 			console.log(
-				`[StandaloneTerminalProcess] fullOutput exceeded ${StandaloneTerminalProcess.MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
+				`[StandaloneTerminalProcess] fullOutput exceeded ${MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
 			)
 		}
 
@@ -291,9 +271,9 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 		// Truncate if too many lines to prevent context overflow
 		const lines = unretrieved.split("\n")
-		if (lines.length > StandaloneTerminalProcess.MAX_UNRETRIEVED_LINES) {
-			const first = lines.slice(0, StandaloneTerminalProcess.TRUNCATE_KEEP_LINES)
-			const last = lines.slice(-StandaloneTerminalProcess.TRUNCATE_KEEP_LINES)
+		if (lines.length > MAX_UNRETRIEVED_LINES) {
+			const first = lines.slice(0, TRUNCATE_KEEP_LINES)
+			const last = lines.slice(-TRUNCATE_KEEP_LINES)
 			const skipped = lines.length - first.length - last.length
 			console.log(
 				`[StandaloneTerminalProcess] getUnretrievedOutput truncating ${lines.length} lines to ${first.length + last.length} lines`,
