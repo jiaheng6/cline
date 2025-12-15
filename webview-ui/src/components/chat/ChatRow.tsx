@@ -1163,7 +1163,7 @@ export const ChatRowContent = memo(
 												? "Pending"
 												: isCommandCompleted
 													? "Completed"
-													: "Not Executed"}
+													: "Skipped"}
 									</span>
 								</div>
 								<div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
