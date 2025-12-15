@@ -13,6 +13,10 @@ import { EventEmitter } from "events"
 
 import type { ITerminal, ITerminalProcess, TerminalProcessEvents } from "../types"
 
+// How long to wait after a process outputs anything before we consider it "cool" again
+const PROCESS_HOT_TIMEOUT_NORMAL = 2_000
+const PROCESS_HOT_TIMEOUT_COMPILING = 15_000
+
 /**
  * Manages the execution of a command in a standalone terminal environment.
  * Extends EventEmitter to provide real-time output streaming.
@@ -205,7 +209,7 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			compilingMarkers.some((marker) => data.toLowerCase().includes(marker.toLowerCase())) &&
 			!markerNullifiers.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
 
-		const hotTimeout = isCompiling ? 15000 : 2000
+		const hotTimeout = isCompiling ? PROCESS_HOT_TIMEOUT_COMPILING : PROCESS_HOT_TIMEOUT_NORMAL
 		console.log(
 			`[StandaloneTerminalProcess.isHot] Output received, setting isHot=true, timeout=${hotTimeout}ms, isCompiling=${isCompiling}`,
 		)
