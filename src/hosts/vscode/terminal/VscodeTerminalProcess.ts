@@ -186,9 +186,6 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 					this.fullOutput = this.fullOutput.slice(-MAX_FULL_OUTPUT_SIZE / 2)
 					// Reset lastRetrievedIndex since we truncated the beginning
 					this.lastRetrievedIndex = 0
-					console.log(
-						`[VscodeTerminalProcess] fullOutput exceeded ${MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
-					)
 				}
 
 				if (this.isListening) {
@@ -302,9 +299,6 @@ export class VscodeTerminalProcess extends EventEmitter<TerminalProcessEvents> i
 			const first = lines.slice(0, TRUNCATE_KEEP_LINES)
 			const last = lines.slice(-TRUNCATE_KEEP_LINES)
 			const skipped = lines.length - first.length - last.length
-			console.log(
-				`[VscodeTerminalProcess] getUnretrievedOutput truncating ${lines.length} lines to ${first.length + last.length} lines`,
-			)
 			return this.removeLastLineArtifacts([...first, `\n... (${skipped} lines truncated) ...\n`, ...last].join("\n"))
 		}
 

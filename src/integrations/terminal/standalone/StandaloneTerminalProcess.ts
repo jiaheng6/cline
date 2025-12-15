@@ -190,12 +190,8 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			!COMPILING_NULLIFIERS.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
 
 		const hotTimeout = isCompiling ? PROCESS_HOT_TIMEOUT_COMPILING : PROCESS_HOT_TIMEOUT_NORMAL
-		console.log(
-			`[StandaloneTerminalProcess.isHot] Output received, setting isHot=true, timeout=${hotTimeout}ms, isCompiling=${isCompiling}`,
-		)
 		this.hotTimer = setTimeout(() => {
 			this.isHot = false
-			console.log(`[StandaloneTerminalProcess.isHot] Timer expired, setting isHot=false`)
 		}, hotTimeout)
 
 		// Store full output with size cap to prevent memory exhaustion
@@ -207,9 +203,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			this.fullOutput = this.fullOutput.slice(-MAX_FULL_OUTPUT_SIZE / 2)
 			// Reset lastRetrievedIndex since we truncated the beginning
 			this.lastRetrievedIndex = 0
-			console.log(
-				`[StandaloneTerminalProcess] fullOutput exceeded ${MAX_FULL_OUTPUT_SIZE} bytes, truncated to ${this.fullOutput.length} bytes`,
-			)
 		}
 
 		if (this.isListening) {
@@ -275,9 +268,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			const first = lines.slice(0, TRUNCATE_KEEP_LINES)
 			const last = lines.slice(-TRUNCATE_KEEP_LINES)
 			const skipped = lines.length - first.length - last.length
-			console.log(
-				`[StandaloneTerminalProcess] getUnretrievedOutput truncating ${lines.length} lines to ${first.length + last.length} lines`,
-			)
 			return this.removeLastLineArtifacts([...first, `\n... (${skipped} lines truncated) ...\n`, ...last].join("\n"))
 		}
 

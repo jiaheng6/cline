@@ -57,9 +57,6 @@ export async function orchestrateCommandExecution(
 ): Promise<OrchestrationResult> {
 	const { command, timeoutSeconds, onOutputLine, showShellIntegrationSuggestion, onProceedWhileRunning } = options
 
-	console.log(`[CommandOrchestrator] Starting orchestration for command: ${command.substring(0, 50)}...`)
-	console.log(`[CommandOrchestrator] onProceedWhileRunning callback provided: ${!!onProceedWhileRunning}`)
-
 	// Track command execution state
 	callbacks.updateBackgroundCommandState(true)
 
@@ -121,7 +118,6 @@ export async function orchestrateCommandExecution(
 				const { response, text, images, files } = await callbacks.ask("command_output", chunk)
 
 				if (response === "yesButtonClicked") {
-					console.log(`[CommandOrchestrator] User clicked "Proceed While Running"`)
 					// Track when user clicks "Proceed While Running"
 					telemetryService.captureTerminalUserIntervention(TerminalUserInterventionAction.PROCESS_WHILE_RUNNING)
 					// Proceed while running - but still capture user feedback if provided
@@ -133,13 +129,8 @@ export async function orchestrateCommandExecution(
 					// Notify caller to start background command tracking
 					// Pass existing output lines so they can be written to the log file
 					// and send log file path to UI if tracking was started
-					console.log(`[CommandOrchestrator] onProceedWhileRunning callback exists: ${!!onProceedWhileRunning}`)
 					if (onProceedWhileRunning) {
-						console.log(
-							`[CommandOrchestrator] Calling onProceedWhileRunning with ${outputLines.length} existing lines`,
-						)
 						const trackingResult = onProceedWhileRunning(outputLines)
-						console.log(`[CommandOrchestrator] trackingResult: ${JSON.stringify(trackingResult)}`)
 
 						// Clear timers first
 						if (chunkTimer) {
@@ -163,7 +154,6 @@ export async function orchestrateCommandExecution(
 							completed: false,
 							outputLines,
 						}
-						console.log(`[CommandOrchestrator] Set backgroundTrackingResult`)
 
 						// Send log file message to UI BEFORE resuming the process
 						// This ensures the message appears before any new output lines
@@ -173,8 +163,6 @@ export async function orchestrateCommandExecution(
 
 						// Now resume the process - any new lines will be handled by the background tracker
 						process.continue()
-
-						console.log(`[CommandOrchestrator] Returning from flushBuffer after background tracking setup`)
 						return
 					}
 
@@ -243,8 +231,6 @@ export async function orchestrateCommandExecution(
 		largeOutputLogPath = path.join(os.tmpdir(), `cline-large-output-${Date.now()}.log`)
 		largeOutputLogStream = fs.createWriteStream(largeOutputLogPath, { flags: "a" })
 
-		console.log(`[CommandOrchestrator] Switching to file-based logging: ${largeOutputLogPath}`)
-
 		// Write all existing lines to file
 		for (const line of outputLines) {
 			largeOutputLogStream.write(line + "\n")
@@ -276,14 +262,12 @@ export async function orchestrateCommandExecution(
 	const outputLines: string[] = []
 	process.on("line", async (line: string) => {
 		if (didCancelViaUi) {
-			console.log(`[CommandOrchestrator] Line received but cancelled via UI, skipping`)
 			return
 		}
 
 		// If background tracking is active, don't process lines here
 		// The background tracker's listener will handle them
 		if (backgroundTrackingResult) {
-			console.log(`[CommandOrchestrator] Line received but backgroundTrackingResult is set, skipping`)
 			return
 		}
 
@@ -307,19 +291,9 @@ export async function orchestrateCommandExecution(
 			if (lastLines.length > SUMMARY_LINES_TO_KEEP) {
 				lastLines.shift()
 			}
-
-			// Log progress periodically
-			if (totalLineCount % 1000 === 0) {
-				console.log(
-					`[CommandOrchestrator] Large output progress: ${totalLineCount} lines, ${Math.round(totalOutputBytes / 1024)}KB`,
-				)
-			}
 		} else {
 			// Normal behavior - keep in memory
 			outputLines.push(line)
-			if (outputLines.length <= 3 || outputLines.length % 20 === 0) {
-				console.log(`[CommandOrchestrator] Line ${outputLines.length}: ${line.substring(0, 50)}...`)
-			}
 		}
 
 		// Notify caller about output line (for background command tracking)
@@ -414,11 +388,7 @@ export async function orchestrateCommandExecution(
 					// If background tracking is available (standalone mode only), use it
 					// This writes output to a log file and detaches the command
 					if (onProceedWhileRunning) {
-						console.log(
-							`[CommandOrchestrator] Timeout: Calling onProceedWhileRunning with ${outputLines.length} existing lines`,
-						)
 						const trackingResult = onProceedWhileRunning(outputLines)
-						console.log(`[CommandOrchestrator] Timeout trackingResult: ${JSON.stringify(trackingResult)}`)
 
 						// Set early return result BEFORE resuming the process
 						// This prevents the orchestrator's listener from processing new lines
@@ -432,7 +402,6 @@ export async function orchestrateCommandExecution(
 							completed: false,
 							outputLines,
 						}
-						console.log(`[CommandOrchestrator] Timeout: Set backgroundTrackingResult`)
 
 						// Send log file message to UI BEFORE resuming the process
 						if (trackingResult?.logFilePath) {
@@ -444,8 +413,6 @@ export async function orchestrateCommandExecution(
 
 						// Now resume the process - any new lines will be handled by the background tracker
 						process.continue()
-
-						console.log(`[CommandOrchestrator] Timeout: Returning with background tracking`)
 						return backgroundTrackingResult
 					}
 
@@ -477,7 +444,6 @@ export async function orchestrateCommandExecution(
 	// Check if we returned early due to background tracking
 	// This happens when user clicks "Proceed While Running" with background tracking enabled
 	if (backgroundTrackingResult) {
-		console.log(`[CommandOrchestrator] Returning early with backgroundTrackingResult`)
 		return backgroundTrackingResult
 	}
 
