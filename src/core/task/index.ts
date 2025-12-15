@@ -3196,16 +3196,10 @@ export class Task {
 		if (busyTerminals.length > 0) {
 			// wait for terminals to cool down
 			// terminalWasBusy = allTerminals.some((t) => this.terminalManager.isProcessHot(t.id))
-			console.log(
-				`[Task.getEnvironmentDetails] Waiting for ${busyTerminals.length} busy terminals to cool down: ${busyTerminals.map((t) => t.id).join(", ")}`,
-			)
 			await pWaitFor(() => busyTerminals.every((t) => !this.terminalManager.isProcessHot(t.id)), {
 				interval: 100,
 				timeout: 15_000,
-			}).catch(() => {
-				console.log(`[Task.getEnvironmentDetails] Timeout waiting for terminals to cool down`)
-			})
-			console.log(`[Task.getEnvironmentDetails] All terminals cooled down (or timeout reached)`)
+			}).catch(() => {})
 		}
 
 		this.taskState.didEditFile = false // reset, this lets us know when to wait for saved files to update terminals

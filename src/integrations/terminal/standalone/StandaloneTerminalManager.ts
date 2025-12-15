@@ -118,9 +118,8 @@ export class StandaloneTerminalManager implements ITerminalManager {
 			terminalInfo.busy = false
 		})
 
-		process.once("error", (error: Error) => {
+		process.once("error", (_error: Error) => {
 			terminalInfo.busy = false
-			console.error(`[StandaloneTerminalManager] Command error on terminal ${terminalInfo.id}:`, error)
 		})
 
 		// Create promise for the process
@@ -168,7 +167,6 @@ export class StandaloneTerminalManager implements ITerminalManager {
 					availableTerminal.terminal.shellIntegration.cwd.fsPath = cwd
 				}
 				this.terminalIds.add(availableTerminal.id)
-				console.log(`[StandaloneTerminalManager] Reused terminal ${availableTerminal.id} with cd`)
 				return availableTerminal
 			}
 		}
@@ -189,25 +187,17 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	 */
 	getTerminals(busy: boolean): { id: number; lastCommand: string }[] {
 		const allTerminalIds = Array.from(this.terminalIds)
-		console.log(
-			`[StandaloneTerminalManager.getTerminals] Looking for busy=${busy} terminals, terminalIds: ${allTerminalIds.join(", ")}`,
-		)
 
 		const terminals = allTerminalIds
 			.map((id) => this.registry.getTerminal(id))
 			.filter((t): t is TerminalInfo => {
 				if (t === undefined) {
-					console.log(`[StandaloneTerminalManager.getTerminals] Terminal undefined`)
 					return false
 				}
-				console.log(
-					`[StandaloneTerminalManager.getTerminals] Terminal ${t.id}: busy=${t.busy}, lastCommand=${t.lastCommand?.substring(0, 30)}...`,
-				)
 				return t.busy === busy
 			})
 			.map((t) => ({ id: t.id, lastCommand: t.lastCommand }))
 
-		console.log(`[StandaloneTerminalManager.getTerminals] Found ${terminals.length} terminals with busy=${busy}`)
 		return terminals
 	}
 
@@ -231,11 +221,7 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	 */
 	isProcessHot(terminalId: number): boolean {
 		const process = this.processes.get(terminalId)
-		const isHot = process ? process.isHot : false
-		console.log(
-			`[StandaloneTerminalManager.isProcessHot] terminalId=${terminalId}, processExists=${!!process}, isHot=${isHot}`,
-		)
-		return isHot
+		return process ? process.isHot : false
 	}
 
 	/**
@@ -447,13 +433,6 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		const id = `background-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
 		const logFilePath = path.join(os.tmpdir(), `cline-${id}.log`)
 
-		console.log(`[StandaloneTerminalManager] trackBackgroundCommand called`)
-		console.log(`[StandaloneTerminalManager] - id: ${id}`)
-		console.log(`[StandaloneTerminalManager] - command: ${command.substring(0, 50)}...`)
-		console.log(`[StandaloneTerminalManager] - existingOutput lines: ${existingOutput.length}`)
-		console.log(`[StandaloneTerminalManager] - logFilePath: ${logFilePath}`)
-		console.log(`[StandaloneTerminalManager] - current backgroundCommands count: ${this.backgroundCommands.size}`)
-
 		const backgroundCommand: BackgroundCommand = {
 			id,
 			command,
@@ -470,26 +449,18 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 		// Write existing output that was captured before tracking started
 		if (existingOutput.length > 0) {
-			console.log(`[StandaloneTerminalManager] Writing ${existingOutput.length} existing lines to log file`)
 			logStream.write(existingOutput.join("\n") + "\n")
 		}
 
 		// Pipe future process output to log file
-		console.log(`[StandaloneTerminalManager] Attaching line listener for future output`)
 		process.on("line", (line: string) => {
 			backgroundCommand.lineCount++
 			logStream.write(line + "\n")
-			if (backgroundCommand.lineCount <= 3 || backgroundCommand.lineCount % 20 === 0) {
-				console.log(
-					`[StandaloneTerminalManager] Background line ${backgroundCommand.lineCount}: ${line.substring(0, 30)}...`,
-				)
-			}
 		})
 
 		// Set up 10-minute hard timeout to prevent zombie processes
 		const timeoutId = setTimeout(() => {
 			if (backgroundCommand.status === "running") {
-				console.log(`[StandaloneTerminalManager] Hard timeout reached for background command ${id}, terminating...`)
 				backgroundCommand.status = "timed_out"
 				logStream.write("\n[TIMEOUT] Process killed after 10 minutes\n")
 				logStream.end()
@@ -504,7 +475,6 @@ export class StandaloneTerminalManager implements ITerminalManager {
 
 		// Listen for completion - clear timeout
 		process.on("completed", () => {
-			console.log(`[StandaloneTerminalManager] Background command ${id} completed`)
 			const timeout = this.backgroundTimeouts.get(id)
 			if (timeout) {
 				clearTimeout(timeout)
@@ -531,7 +501,6 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		})
 
 		this.backgroundCommands.set(id, backgroundCommand)
-		console.log(`[StandaloneTerminalManager] Background command registered, total: ${this.backgroundCommands.size}`)
 		return backgroundCommand
 	}
 
@@ -631,8 +600,8 @@ export class StandaloneTerminalManager implements ITerminalManager {
 		for (const [_id, logStream] of this.logStreams) {
 			try {
 				logStream.end()
-			} catch (error) {
-				console.error(`[StandaloneTerminalManager] Error closing log stream:`, error)
+			} catch (_error) {
+				// Ignore errors when closing log streams
 			}
 		}
 		this.logStreams.clear()
