@@ -197,8 +197,12 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			!markerNullifiers.some((nullifier) => data.toLowerCase().includes(nullifier.toLowerCase()))
 
 		const hotTimeout = isCompiling ? 15000 : 2000
+		console.log(
+			`[StandaloneTerminalProcess.isHot] Output received, setting isHot=true, timeout=${hotTimeout}ms, isCompiling=${isCompiling}`,
+		)
 		this.hotTimer = setTimeout(() => {
 			this.isHot = false
+			console.log(`[StandaloneTerminalProcess.isHot] Timer expired, setting isHot=false`)
 		}, hotTimeout)
 
 		// Store full output
@@ -206,7 +210,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 		if (this.isListening) {
 			this.emitLines(data)
-			this.lastRetrievedIndex = this.fullOutput.length - this.buffer.length
 		}
 	}
 

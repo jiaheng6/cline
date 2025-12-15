@@ -186,10 +186,27 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	 * @returns Array of terminal info with id and last command
 	 */
 	getTerminals(busy: boolean): { id: number; lastCommand: string }[] {
-		return Array.from(this.terminalIds)
+		const allTerminalIds = Array.from(this.terminalIds)
+		console.log(
+			`[StandaloneTerminalManager.getTerminals] Looking for busy=${busy} terminals, terminalIds: ${allTerminalIds.join(", ")}`,
+		)
+
+		const terminals = allTerminalIds
 			.map((id) => this.registry.getTerminal(id))
-			.filter((t): t is TerminalInfo => t !== undefined && t.busy === busy)
+			.filter((t): t is TerminalInfo => {
+				if (t === undefined) {
+					console.log(`[StandaloneTerminalManager.getTerminals] Terminal undefined`)
+					return false
+				}
+				console.log(
+					`[StandaloneTerminalManager.getTerminals] Terminal ${t.id}: busy=${t.busy}, lastCommand=${t.lastCommand?.substring(0, 30)}...`,
+				)
+				return t.busy === busy
+			})
 			.map((t) => ({ id: t.id, lastCommand: t.lastCommand }))
+
+		console.log(`[StandaloneTerminalManager.getTerminals] Found ${terminals.length} terminals with busy=${busy}`)
+		return terminals
 	}
 
 	/**
@@ -212,7 +229,11 @@ export class StandaloneTerminalManager implements ITerminalManager {
 	 */
 	isProcessHot(terminalId: number): boolean {
 		const process = this.processes.get(terminalId)
-		return process ? process.isHot : false
+		const isHot = process ? process.isHot : false
+		console.log(
+			`[StandaloneTerminalManager.isProcessHot] terminalId=${terminalId}, processExists=${!!process}, isHot=${isHot}`,
+		)
+		return isHot
 	}
 
 	/**

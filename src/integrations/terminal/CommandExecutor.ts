@@ -64,16 +64,27 @@ export class CommandExecutor {
 		this.terminalManager = config.terminalManager
 		this.callbacks = callbacks
 
-		// Always create StandaloneTerminalManager for subagents (even in VSCode mode)
-		this.standaloneManager = new StandaloneTerminalManager()
+		// When in backgroundExec mode, the terminalManager is already a StandaloneTerminalManager
+		// created by Task. We should reuse it so that Task.getEnvironmentDetails() can see
+		// the terminals and processes we create (for isHot logic, busy terminals, etc.)
+		if (config.terminalExecutionMode === "backgroundExec" && config.terminalManager instanceof StandaloneTerminalManager) {
+			// Reuse the same instance that Task is using
+			this.standaloneManager = config.terminalManager
+			Logger.info(`[CommandExecutor] Reusing Task's StandaloneTerminalManager for backgroundExec mode`)
+		} else {
+			// Create new StandaloneTerminalManager for subagents (even in VSCode mode)
+			// This ensures subagents run in hidden terminals, not cluttering the user's VSCode terminal
+			this.standaloneManager = new StandaloneTerminalManager()
+			Logger.info(`[CommandExecutor] Created new StandaloneTerminalManager for subagents`)
 
-		// Copy settings from the provided terminalManager to ensure consistency
-		if ("shellIntegrationTimeout" in config.terminalManager) {
-			const tm = config.terminalManager as any
-			this.standaloneManager.setShellIntegrationTimeout(tm.shellIntegrationTimeout || 4000)
-			this.standaloneManager.setTerminalReuseEnabled(tm.terminalReuseEnabled ?? true)
-			this.standaloneManager.setTerminalOutputLineLimit(tm.terminalOutputLineLimit || 500)
-			this.standaloneManager.setSubagentTerminalOutputLineLimit(tm.subagentTerminalOutputLineLimit || 2000)
+			// Copy settings from the provided terminalManager to ensure consistency
+			if ("shellIntegrationTimeout" in config.terminalManager) {
+				const tm = config.terminalManager as any
+				this.standaloneManager.setShellIntegrationTimeout(tm.shellIntegrationTimeout || 4000)
+				this.standaloneManager.setTerminalReuseEnabled(tm.terminalReuseEnabled ?? true)
+				this.standaloneManager.setTerminalOutputLineLimit(tm.terminalOutputLineLimit || 500)
+				this.standaloneManager.setSubagentTerminalOutputLineLimit(tm.subagentTerminalOutputLineLimit || 2000)
+			}
 		}
 	}
 
