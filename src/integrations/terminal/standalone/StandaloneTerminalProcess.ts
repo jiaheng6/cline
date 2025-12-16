@@ -8,7 +8,7 @@
  * Implements ITerminalProcess interface for polymorphic usage with CommandExecutor.
  */
 
-import { ChildProcess, spawn } from "child_process"
+import { ChildProcess, execSync, spawn } from "child_process"
 import { EventEmitter } from "events"
 
 import {
@@ -76,8 +76,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 	 * @param command The command to execute
 	 */
 	async run(terminal: ITerminal, command: string): Promise<void> {
-		console.log(`[StandaloneTerminal] Running command: ${command}`)
-
 		// Get shell and working directory from terminal
 		const shell = (terminal as any)._shellPath || this.getDefaultShell()
 		const cwd = (terminal as any)._cwd || process.cwd()
@@ -113,8 +111,12 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 				// Spawn the process with special handling for "cmd.exe"
 				this.childProcess = spawn("cmd.exe", shellArgs, shellOptions)
 			} else {
-				// Spawn the process
-				this.childProcess = spawn(shell, shellArgs, shellOptions)
+				// Spawn the process with detached: true to create a process group
+				// This allows us to kill the entire process tree when terminating
+				this.childProcess = spawn(shell, shellArgs, {
+					...shellOptions,
+					detached: true,
+				})
 			}
 
 			// Track process state
@@ -141,8 +143,7 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			})
 
 			// Handle process completion
-			this.childProcess.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
-				console.log(`[StandaloneTerminal] Process closed with code ${code}, signal ${signal}`)
+			this.childProcess.on("close", (code: number | null, _signal: NodeJS.Signals | null) => {
 				this.exitCode = code
 				this.isCompleted = true
 				this.emitRemainingBuffer()
@@ -159,7 +160,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 			// Handle process errors
 			this.childProcess.on("error", (error: Error) => {
-				console.error(`[StandaloneTerminal] Process error:`, error)
 				this.emit("error", error)
 			})
 
@@ -167,7 +167,6 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			;(terminal as any)._process = this.childProcess
 			;(terminal as any)._processId = this.childProcess.pid
 		} catch (error) {
-			console.error(`[StandaloneTerminal] Failed to spawn process:`, error)
 			this.emit("error", error)
 		}
 	}
@@ -320,40 +319,56 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 	}
 
 	/**
-	 * Terminate the process if it's still running.
+	 * Terminate the process and all its children.
+	 *
+	 * On Unix: Uses process groups to kill the entire process tree.
+	 * When spawned with detached: true, the process becomes the leader of its own
+	 * process group. Using process.kill(-pid) sends the signal to all processes
+	 * in that group, ensuring child processes (like webpack-dev-server) are killed.
+	 *
+	 * On Windows: Uses taskkill with /T flag to kill the process tree.
 	 */
 	terminate(): void {
 		if (!this.childProcess || this.isCompleted) {
-			console.log(`[StandaloneTerminal] Process already completed or doesn't exist, skipping termination`)
 			return
 		}
 
 		const pid = this.childProcess.pid
-		console.log(`[StandaloneTerminal] Terminating process ${pid} with SIGTERM`)
+		if (!pid) {
+			return
+		}
 
-		try {
-			this.childProcess.kill("SIGTERM")
-
-			// Force kill after timeout if process doesn't exit gracefully
-			setTimeout(() => {
-				if (!this.isCompleted && this.childProcess) {
-					console.log(`[StandaloneTerminal] Process ${pid} did not exit gracefully, force killing with SIGKILL`)
-					try {
-						this.childProcess.kill("SIGKILL")
-					} catch (killError) {
-						console.error(`[StandaloneTerminal] Failed to force kill process ${pid}:`, killError)
-					}
-				} else {
-					console.log(`[StandaloneTerminal] Process ${pid} exited gracefully`)
-				}
-			}, 5000)
-		} catch (error) {
-			console.error(`[StandaloneTerminal] Failed to send SIGTERM to process ${pid}:`, error)
-			// Try SIGKILL immediately if SIGTERM fails
+		if (process.platform === "win32") {
+			// Windows: Use taskkill to kill the entire process tree
+			// /T = kill child processes, /F = force kill
 			try {
-				this.childProcess.kill("SIGKILL")
-			} catch (killError) {
-				console.error(`[StandaloneTerminal] Failed to send SIGKILL to process ${pid}:`, killError)
+				execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" })
+			} catch (_error) {
+				// Process may have already exited, ignore errors
+			}
+		} else {
+			// Unix: Kill the entire process group using negative PID
+			// This sends the signal to all processes in the group
+			try {
+				process.kill(-pid, "SIGTERM")
+
+				// Force kill after timeout if process doesn't exit gracefully
+				setTimeout(() => {
+					if (!this.isCompleted) {
+						try {
+							process.kill(-pid, "SIGKILL")
+						} catch (_e) {
+							// Process group may have already exited
+						}
+					}
+				}, 5000)
+			} catch (_error) {
+				// Fallback: try killing just the parent process
+				try {
+					this.childProcess.kill("SIGTERM")
+				} catch (_e) {
+					// Process may have already exited
+				}
 			}
 		}
 	}
