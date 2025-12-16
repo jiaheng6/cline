@@ -8,8 +8,9 @@
  * Implements ITerminalProcess interface for polymorphic usage with CommandExecutor.
  */
 
-import { ChildProcess, execSync, spawn } from "child_process"
+import { ChildProcess, spawn } from "child_process"
 import { EventEmitter } from "events"
+import treeKill from "tree-kill"
 
 import {
 	COMPILING_MARKERS,
@@ -321,12 +322,9 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 	/**
 	 * Terminate the process and all its children.
 	 *
-	 * On Unix: Uses process groups to kill the entire process tree.
-	 * When spawned with detached: true, the process becomes the leader of its own
-	 * process group. Using process.kill(-pid) sends the signal to all processes
-	 * in that group, ensuring child processes (like webpack-dev-server) are killed.
-	 *
-	 * On Windows: Uses taskkill with /T flag to kill the process tree.
+	 * Uses tree-kill package which handles cross-platform process tree termination:
+	 * - On Unix: Uses process groups to kill the entire process tree
+	 * - On Windows: Uses taskkill with /T flag to kill the process tree
 	 */
 	terminate(): void {
 		if (!this.childProcess || this.isCompleted) {
@@ -338,38 +336,7 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 			return
 		}
 
-		if (process.platform === "win32") {
-			// Windows: Use taskkill to kill the entire process tree
-			// /T = kill child processes, /F = force kill
-			try {
-				execSync(`taskkill /pid ${pid} /T /F`, { stdio: "ignore" })
-			} catch (_error) {
-				// Process may have already exited, ignore errors
-			}
-		} else {
-			// Unix: Kill the entire process group using negative PID
-			// This sends the signal to all processes in the group
-			try {
-				process.kill(-pid, "SIGTERM")
-
-				// Force kill after timeout if process doesn't exit gracefully
-				setTimeout(() => {
-					if (!this.isCompleted) {
-						try {
-							process.kill(-pid, "SIGKILL")
-						} catch (_e) {
-							// Process group may have already exited
-						}
-					}
-				}, 5000)
-			} catch (_error) {
-				// Fallback: try killing just the parent process
-				try {
-					this.childProcess.kill("SIGTERM")
-				} catch (_e) {
-					// Process may have already exited
-				}
-			}
-		}
+		// tree-kill handles cross-platform process tree termination
+		treeKill(pid, "SIGTERM")
 	}
 }
