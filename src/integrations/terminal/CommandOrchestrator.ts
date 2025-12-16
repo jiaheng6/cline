@@ -55,7 +55,7 @@ export async function orchestrateCommandExecution(
 	callbacks: CommandExecutorCallbacks,
 	options: OrchestrationOptions,
 ): Promise<OrchestrationResult> {
-	const { command, timeoutSeconds, onOutputLine, showShellIntegrationSuggestion, onProceedWhileRunning } = options
+	const { timeoutSeconds, onOutputLine, showShellIntegrationSuggestion, onProceedWhileRunning } = options
 
 	// Track command execution state
 	callbacks.updateBackgroundCommandState(true)
