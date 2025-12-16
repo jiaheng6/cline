@@ -228,6 +228,25 @@ export async function orchestrateCommandExecution(
 		if (isWritingToFile) return
 
 		isWritingToFile = true
+
+		// FIRST: Flush any pending buffer to UI so the "writing to file" message appears at the end
+		if (outputBuffer.length > 0) {
+			const chunk = outputBuffer.join("\n")
+			outputBuffer = []
+			outputBufferSize = 0
+			if (!didContinue) {
+				// Use say() instead of ask() since we're transitioning to file mode
+				await callbacks.say("command_output", chunk)
+			}
+		}
+
+		// Clear any pending flush timer
+		if (chunkTimer) {
+			clearTimeout(chunkTimer)
+			chunkTimer = null
+		}
+
+		// Set up file logging
 		largeOutputLogPath = path.join(os.tmpdir(), `cline-large-output-${Date.now()}.log`)
 		largeOutputLogStream = fs.createWriteStream(largeOutputLogPath, { flags: "a" })
 
@@ -242,7 +261,7 @@ export async function orchestrateCommandExecution(
 		// Keep last N lines for summary (will be updated as more lines come in)
 		lastLines = outputLines.slice(-SUMMARY_LINES_TO_KEEP)
 
-		// Notify user
+		// FINALLY: Notify user (now this will appear at the end after all buffered output)
 		await callbacks.say(
 			"command_output",
 			`\n📋 Output is large (${outputLines.length} lines, ${Math.round(totalOutputBytes / 1024)}KB). Writing to: ${largeOutputLogPath}`,
