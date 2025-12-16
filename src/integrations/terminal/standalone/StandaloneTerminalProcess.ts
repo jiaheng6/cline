@@ -333,6 +333,8 @@ export class StandaloneTerminalProcess extends EventEmitter<TerminalProcessEvent
 
 		const pid = this.childProcess.pid
 		if (!pid) {
+			// Fallback: try to kill the process directly if PID is unavailable
+			this.childProcess.kill("SIGTERM")
 			return
 		}
 
